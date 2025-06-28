@@ -95,6 +95,11 @@ class Deployment extends WireData
 
     $this->trigger("delete", "before");
     $this->delete();
+    // Recreate cache directory after deletion to avoid ProcessWire cache errors
+    $cacheDir = $this->paths->release . '/site/assets/cache';
+    if (!is_dir($cacheDir)) {
+      mkdir($cacheDir, 0777, true);
+    }
     $this->trigger("delete", "after");
 
     $this->trigger("secure", "before");
@@ -482,7 +487,7 @@ class Deployment extends WireData
     $release = $this->paths->release;
     $file = "$release/site/modules/RockMigrations/migrate.php";
     if (!is_file($file)) return $this->echo("RockMigrations not found ...");
-    $this->section("Trigger RockMigrations ...");
+    $this->section("Trigger RockMigrations ... v2");
     $php = $this->php();
     try {
       $out = $this->exec("$php $file", true);
