@@ -2914,6 +2914,12 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
       // this makes it possible to prevent downloading at runtime
       if (!$host = $this->wire->config->filesOnDemand) return;
 
+      // if $host is a callback, call it
+      if (is_callable($host)) {
+        $host = $host($pagefile);
+        if (!$host) return;
+      }
+
       // convert url to disk path
       if ($event->method == 'url') {
         $file = $config->paths->root . substr($file, strlen($config->urls->root));
@@ -3746,13 +3752,13 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
    *
    * Usage:
    * Call $rm->pageClassLoader($this) in your module's init() method and place
-   * all page classes inside the /classes folder and use the same namespace
+   * all page classes inside the /pageClasses folder and use the same namespace
    * as the module's classname.
    *
    * Example "MyModule"
    * /site/modules/MyModule/MyModule.module.php
-   * /site/modules/MyModule/classes/Foo.php --> namespace MyModule
-   * /site/modules/MyModule/classes/Bar.php --> namespace MyModule
+   * /site/modules/MyModule/pageClasses/Foo.php --> namespace MyModule
+   * /site/modules/MyModule/pageClasses/Bar.php --> namespace MyModule
    */
   public function pageClassLoader(Module $module, $folder = "classes"): void
   {
@@ -4067,6 +4073,8 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
       'tooltips' => false,
       'tableclass' => "uk-table-striped",
       'nl2br' => false,
+      'labelNode' => 'strong',
+      'tdStyle' => 'padding-top: 5px;',
     ]);
     $opt->setArray($options);
 
@@ -4094,8 +4102,8 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
       $t = $opt->tooltips ? "title='$k' uk-tooltip" : "";
       $val = $opt->nl2br ? nl2br($v) : $v;
       $out .= "<tr>
-          <td class='uk-width-expand'>
-            <span class='uk-text-small uk-text-muted' $t>$label</span><br>
+          <td class='uk-width-expand' style='{$opt->tdStyle}'>
+            <{$opt->labelNode} class='uk-text-small uk-text-muted' $t>$label</{$opt->labelNode}><br>
             $val
           </td>
         </tr>";
@@ -5321,7 +5329,7 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
       'name' => '_RockMigrations',
       'type' => 'markup',
       'label' => 'RockMigrations',
-      'value' => '<div class="uk-alert">
+      'value' => '<div class="uk-alert uk-margin-remove">
         ATTENTION - RockMigrations is installed on this system. You can apply
         changes in the GUI as usual but if any settings are set via code in a
         migration file they will be overwritten on the next migration cycle!
