@@ -8,7 +8,9 @@ class RmTransform extends Command
 {
   public function config()
   {
-    $this->setDescription("Transform the projects folder structure to RockMigrations deployments");
+    $this
+      ->setDescription("Transform the projects folder structure to RockMigrations deployments")
+      ->addOption('lazy', null, \Symfony\Component\Console\Input\InputOption::VALUE_NONE, 'Enable lazy (non-interactive) mode');
   }
 
   public function handle()
@@ -16,22 +18,30 @@ class RmTransform extends Command
     // Use rootPath for full project copy, docroot for shared assets
     $root = rtrim($this->app->rootPath(), "/");
     $docroot = rtrim($this->app->docroot(), "/");
+    $lazy = $this->option('lazy') ? true : false;
 
-    if (!$this->confirm("This will create a new folder structure in $root - continue?")) {
+    if (!$lazy && !$this->confirm("This will create a new folder structure in $root - continue?")) {
       return self::SUCCESS;
     }
 
     // backup current folder
     $name = 'backup-' . date('Y-m-d-His');
     $backupPath = dirname($root) . "/$name";
-    if ($this->confirm("Backup current folder to $backupPath?", true)) {
-      exec("cp -r $root $backupPath");
+    $backup_ok=false;
+    if ($lazy || $this->confirm("Backup current folder to $backupPath?", true)) {
+      if (exec("cp -r $root $backupPath") === false) {
+        $this->error("Backup failed!");
+      } else {
+        $this->success("Backup created at $backupPath.");
+        $backup_ok=true;
+      }
     }
 
     // cleanup
     exec("cd $root && rm -rf release-1");
     exec("cd $root && rm -rf current");
     exec("cd $root && rm -rf shared");
+    $this->success("Old release/current/shared folders cleaned up.");
 
     // create folders
     $release = "$root/release-1";
@@ -39,6 +49,7 @@ class RmTransform extends Command
     exec("mkdir -p $release");
     exec("mkdir -p $shared");
     exec("cd $root && ln -snf release-1 current");
+    $this->success("Folder structure reorganized.");
 
     // copy files from root to release-1
     foreach (glob("$root/{.,}*", GLOB_BRACE) as $file) {
@@ -75,15 +86,21 @@ class RmTransform extends Command
     exec("cp -r $sitePath/assets/files $shared/site/assets");
     exec("cp -r $sitePath/assets/backups $shared/site/assets");
     exec("cp $sitePath/config-local.php $shared/site/config-local.php");
+    $this->success("Shared assets copied.");
 
     // add symlinks for these files
     exec("cd $root && rm -rf $sitePath/assets/files && ln -snf ../../../shared/site/assets/files $sitePath/assets/files");
     exec("cd $root && rm -rf $sitePath/assets/backups && ln -snf ../../../shared/site/assets/backups $sitePath/assets/backups");
     exec("cd $root && rm -rf $sitePath/config-local.php && ln -snf ../../shared/site/config-local.php $sitePath/config-local.php");
+    $this->success("Symlinks for shared assets created.");
 
     // remove backup folder?
-    if ($this->confirm("Remove backup folder $backupPath?")) {
-      exec("rm -rf $backupPath");
+    if ($backup_ok && ($lazy || $this->confirm("Remove backup folder $backupPath?"))) {
+      if (exec("rm -rf $backupPath") === false) {
+        $this->error("Failed to remove backup folder $backupPath!");
+      } else {
+        $this->success("Backup removed.");
+      }
     }
 
     // this prevents the following error:
