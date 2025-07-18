@@ -13,36 +13,35 @@ class RmTransform extends Command
 
   public function handle()
   {
-    // load root path via PHP
-    // don't load $config via wire() because it will try to create some
-    // new cache files on shutdown which will show warnings in the console
-    $src = rtrim($this->app->rootPath(), "/");
+    // Use rootPath for full project copy, docroot for shared assets
+    $root = rtrim($this->app->rootPath(), "/");
+    $docroot = rtrim($this->app->docroot(), "/");
 
-    if (!$this->confirm("This will create a new folder structure in $src - continue?")) {
+    if (!$this->confirm("This will create a new folder structure in $root - continue?")) {
       return self::SUCCESS;
     }
 
     // backup current folder
     $name = 'backup-' . date('Y-m-d-His');
-    $backupPath = dirname($src) . "/$name";
+    $backupPath = dirname($root) . "/$name";
     if ($this->confirm("Backup current folder to $backupPath?", true)) {
-      exec("cp -r $src $backupPath");
+      exec("cp -r $root $backupPath");
     }
 
     // cleanup
-    exec("cd $src && rm -rf release-1");
-    exec("cd $src && rm -rf current");
-    exec("cd $src && rm -rf shared");
+    exec("cd $root && rm -rf release-1");
+    exec("cd $root && rm -rf current");
+    exec("cd $root && rm -rf shared");
 
     // create folders
-    $release = "$src/release-1";
+    $release = "$root/release-1";
+    $shared = "$root/shared";
     exec("mkdir -p $release");
-    $shared = "$src/shared";
     exec("mkdir -p $shared");
-    exec("cd $src && ln -snf release-1 current");
+    exec("cd $root && ln -snf release-1 current");
 
-    // copy files
-    foreach (glob("$src/{.,}*", GLOB_BRACE) as $file) {
+    // copy files from root to release-1
+    foreach (glob("$root/{.,}*", GLOB_BRACE) as $file) {
       $f = basename($file);
       // skip
       if (
@@ -58,23 +57,29 @@ class RmTransform extends Command
         continue;
       }
 
-      $this->write("Copy $file ...");
-      exec("cd $src && cp -r $f $release");
+      exec("cd $root && cp -r $f $release");
       if (is_file($file)) exec("rm $file");
       elseif (is_dir($file)) exec("rm -rf $file");
     }
 
+    // If docroot is not root, copy public/ into release-1/public
+    if ($docroot !== $root && is_dir($docroot)) {
+      exec("cp -r $docroot $release/public");
+    }
+
+    // Determine correct site path for shared assets
+    $sitePath = ($docroot !== $root) ? "$release/public/site" : "$release/site";
+
     // copy shared assets to shared folder
-    $this->write("Copy files to shared folder ...");
     exec("mkdir -p $shared/site/assets");
-    exec("cp -r $release/site/assets/files $shared/site/assets");
-    exec("cp -r $release/site/assets/backups $shared/site/assets");
-    exec("cp $release/site/config-local.php $shared/site/config-local.php");
+    exec("cp -r $sitePath/assets/files $shared/site/assets");
+    exec("cp -r $sitePath/assets/backups $shared/site/assets");
+    exec("cp $sitePath/config-local.php $shared/site/config-local.php");
 
     // add symlinks for these files
-    exec("cd $src && rm -rf $release/site/assets/files && ln -snf ../../../shared/site/assets/files $release/site/assets/files");
-    exec("cd $src && rm -rf $release/site/assets/backups && ln -snf ../../../shared/site/assets/backups $release/site/assets/backups");
-    exec("cd $src && rm -rf $release/site/config-local.php && ln -snf ../../shared/site/config-local.php $release/site/config-local.php");
+    exec("cd $root && rm -rf $sitePath/assets/files && ln -snf ../../../shared/site/assets/files $sitePath/assets/files");
+    exec("cd $root && rm -rf $sitePath/assets/backups && ln -snf ../../../shared/site/assets/backups $sitePath/assets/backups");
+    exec("cd $root && rm -rf $sitePath/config-local.php && ln -snf ../../shared/site/config-local.php $sitePath/config-local.php");
 
     // remove backup folder?
     if ($this->confirm("Remove backup folder $backupPath?")) {
@@ -82,7 +87,7 @@ class RmTransform extends Command
     }
 
     // this prevents the following error:
-    // Class "Illuminate\Console\Events\CommandFinished" not found
+    // Class \"Illuminate\\Console\\Events\\CommandFinished\" not found
     die();
   }
 
