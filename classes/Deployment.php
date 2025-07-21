@@ -313,7 +313,14 @@ class Deployment extends WireData
   public function dumpDB($pwroot = null)
   {
     if ($this->dry) return $this->echo("Dry run - skipping dumpDB()...");
-    if (!$pwroot) $pwroot = $this->paths->root . "/current";
+    $envPwRoot = getenv('PW_ROOT');
+    echo "[DEBUG] PW_ROOT env: ".$envPwRoot."\n"; // test echo
+    if (!$pwroot) {
+      $pwroot = $this->paths->root . "/current";
+      if ($envPwRoot) {
+        $pwroot .= '/' . trim($envPwRoot, '/');
+      }
+    }
     try {
       $this->section("Database Dump");
       $this->echo("Trying to create a DB dump of old release...");
@@ -411,7 +418,11 @@ class Deployment extends WireData
   public function getDB()
   {
     try {
+      $envPwRoot = getenv('PW_ROOT');
       $pwroot = $this->paths->root . "/current";
+      if ($envPwRoot) {
+        $pwroot .= '/' . trim($envPwRoot, '/');
+      }
       if (!is_file($f = "$pwroot/wire/config.php")) throw new Exception("$f not found");
       if (!is_file($f = "$pwroot/site/config.php")) throw new Exception("$f not found");
       $config = ProcessWire::buildConfig($pwroot);
