@@ -88,10 +88,11 @@ class RmTransform extends Command
     exec("cp $sitePath/config-local.php $shared/site/config-local.php");
     $this->success("Shared assets copied.");
 
+
     // add symlinks for these files
-    exec("cd $root && rm -rf $sitePath/assets/files && ln -snf ../../../shared/site/assets/files $sitePath/assets/files");
-    exec("cd $root && rm -rf $sitePath/assets/backups && ln -snf ../../../shared/site/assets/backups $sitePath/assets/backups");
-    exec("cd $root && rm -rf $sitePath/config-local.php && ln -snf ../../shared/site/config-local.php $sitePath/config-local.php");
+    exec("rm -rf $sitePath/assets/files && ln -snf $root/shared/site/assets/files $sitePath/assets/files");
+    exec("rm -rf $sitePath/assets/backups && ln -snf $root/shared/site/assets/backups $sitePath/assets/backups");
+    exec("rm -rf $sitePath/config-local.php && ln -snf $root/shared/site/config-local.php $sitePath/config-local.php");
     $this->success("Symlinks for shared assets created.");
 
     // remove backup folder?
