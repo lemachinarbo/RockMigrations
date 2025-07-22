@@ -29,6 +29,8 @@ class Deployment extends WireData
   private $php = "php";
   private $robots;
   public $share = [];
+  public $pwrootdir;
+  public $current;
 
   public function __construct($argv = null)
   {
@@ -39,8 +41,24 @@ class Deployment extends WireData
     $this->branch = '';
     if ($argv and count($argv) > 1) $this->branch = $argv[1];
 
+    // Initialize pwrootdir from environment
+    $this->pwrootdir = getenv('PW_ROOT') ? trim(getenv('PW_ROOT'), '/') : '';
+
     // path to the current release
     $this->paths->release = getcwd();
+    
+    // PW detection: if we're in a 'public' folder, assume it's the PW root subfolder
+    $currentDirName = basename($this->paths->release);
+    
+    // Auto-detect public folder structure
+    if (!$this->pwrootdir && $currentDirName === 'public') {
+      $this->pwrootdir = 'public';
+    }
+    
+    // If we're in a subfolder (like public), set release to parent
+    if ($this->pwrootdir && $currentDirName === $this->pwrootdir) {
+      $this->paths->release = dirname($this->paths->release);
+    }
 
     // path to the root that contains all releases and current + shared folder
     $this->paths->root = dirname($this->paths->release);
@@ -48,7 +66,10 @@ class Deployment extends WireData
     // path to shared folder
     $this->paths->shared = $this->paths->root . "/shared";
 
-    // setup default share directories
+    // Set up default shared directories.
+    // Always use shared/site/* (not shared/public/site/*), for compatibility
+    // with existing deployments and cpw-transform.
+    // This works for both traditional and public folder structures.
     $this->share = [
       '/site/config-local.php',
       '/site/assets/files',
@@ -66,6 +87,13 @@ class Deployment extends WireData
       '/site/assets/ProCache',
       '/site/assets/pwpc-*',
     ];
+
+    $this->current = $this->paths->root . "/current";
+
+    // Output minimal info for debugging
+      // $this->echo("Release: {$this->paths->release}");
+      // $this->echo("Root: {$this->paths->root}");
+      // $this->echo("PW Root Dir: " . ($this->pwrootdir ?: 'none'));
   }
 
   /**
@@ -95,12 +123,11 @@ class Deployment extends WireData
 
     $this->trigger("delete", "before");
     $this->delete();
-    // Recreate cache directory after deletion to avoid ProcessWire cache errors
-    $cacheDir = $this->paths->release . '/site/assets/cache';
-    if (!is_dir($cacheDir)) {
-      mkdir($cacheDir, 0777, true);
-    }
     $this->trigger("delete", "after");
+
+    $this->trigger("cacheDir", "before");
+    $this->ensureCacheDir();
+    $this->trigger("cacheDir", "after");
 
     $this->trigger("secure", "before");
     $this->secure();
@@ -242,8 +269,9 @@ class Deployment extends WireData
       // execute deletion
       $this->section("Deleting files...");
       $this->echo("Usage: \$deploy->delete('/site/assets/foo');");
+      
       foreach ($this->delete as $file) {
-        $file = trim(Paths::normalizeSeparators($file), "/");
+        $file = trim(str_replace(['\\', '/'], '/', $file), "/");
         $this->echo("  $file");
         $this->exec("rm -rf $file");
       }
@@ -313,11 +341,12 @@ class Deployment extends WireData
   public function dumpDB($pwroot = null)
   {
     if ($this->dry) return $this->echo("Dry run - skipping dumpDB()...");
-    if (!$pwroot) $pwroot = $this->paths->root . "/current";
+    if (!$pwroot) {
+      $pwroot = $this->getPwRoot();
+    }
     try {
       $this->section("Database Dump");
       $this->echo("Trying to create a DB dump of old release...");
-
       if (!is_file($f = "$pwroot/wire/config.php")) throw new Exception("$f not found");
       if (!is_file($f = "$pwroot/site/config.php")) throw new Exception("$f not found");
       $config = ProcessWire::buildConfig($pwroot);
@@ -384,15 +413,21 @@ class Deployment extends WireData
    */
   public function finish($keep = null)
   {
-    $oldPath = $this->paths->release;
-    $newName = substr(basename($oldPath), 4);
+    $releaseRoot = $this->paths->release;
+    $oldPath = $releaseRoot;
+    $newName = substr(basename($releaseRoot), 4);
     $this->section("Finishing deployment - updating symlink...");
+    
+    $this->echo("[DEBUG] oldPath: $oldPath");
+    $this->echo("[DEBUG] newName: $newName");
+    $this->echo("[DEBUG] root: {$this->paths->root}");
+    
     $this->exec("mv $oldPath {$this->paths->root}/$newName");
     $this->exec("
       cd {$this->paths->root}
       ln -snf $newName current
     ");
-
+    
     // chown symlink?
     if ($this->chown) {
       $this->echo("Updating symlink permissions");
@@ -401,7 +436,6 @@ class Deployment extends WireData
       $group = filegroup($root);
       $this->exec("chown $owner:$group $root/current", true);
     }
-
     $this->deleteOldReleases($keep);
   }
 
@@ -411,7 +445,7 @@ class Deployment extends WireData
   public function getDB()
   {
     try {
-      $pwroot = $this->paths->root . "/current";
+      $pwroot = $this->getPwRoot();
       if (!is_file($f = "$pwroot/wire/config.php")) throw new Exception("$f not found");
       if (!is_file($f = "$pwroot/site/config.php")) throw new Exception("$f not found");
       $config = ProcessWire::buildConfig($pwroot);
@@ -427,6 +461,12 @@ class Deployment extends WireData
     } catch (\Throwable $th) {
       $this->echo($th->getMessage());
     }
+  }
+
+  public function getPwRoot() {
+    $base = $this->paths->release;
+    $result = $this->pwrootdir ? ($base . '/' . $this->pwrootdir) : $base;
+    return $result;
   }
 
   public function healthcheck()
@@ -484,10 +524,10 @@ class Deployment extends WireData
    */
   public function migrate()
   {
-    $release = $this->paths->release;
-    $file = "$release/site/modules/RockMigrations/migrate.php";
+    $pwroot = $this->getPwRoot();
+    $file = "$pwroot/site/modules/RockMigrations/migrate.php";
     if (!is_file($file)) return $this->echo("RockMigrations not found ...");
-    $this->section("Trigger RockMigrations ... v2");
+    $this->section("Trigger RockMigrations ... v3");
     $php = $this->php();
     try {
       $out = $this->exec("$php $file", true);
@@ -623,8 +663,10 @@ class Deployment extends WireData
   {
     $release = $this->paths->release;
     $shared = $this->paths->shared;
+    $sitePrefix = $this->pwrootdir ? "/$this->pwrootdir" : '';
+    
     $this->section("Securing file and folder permissions...");
-    $this->exec("chmod 440 $release/site/config.php
+    $this->exec("chmod 440 $release$sitePrefix/site/config.php
       chmod 440 $shared/site/config-local.php", true);
     $this->ok();
   }
@@ -674,9 +716,19 @@ class Deployment extends WireData
         }
 
         // prepare the src path
-        $file = trim(Paths::normalizeSeparators($file), "/");
-        $from = Paths::normalizeSeparators("$release/$file");
-        $toAbs = Paths::normalizeSeparators("$shared/$file");
+        $file = trim(str_replace(['\\', '/'], '/', $file), "/");
+        
+        // For public folder structures, we need to map the paths correctly:
+        // Release: /release/public/site/assets/files -> Shared: /shared/site/assets/files
+        // For traditional: /release/site/assets/files -> Shared: /shared/site/assets/files
+        $from = str_replace(['\\', '/'], '/', "$release/$file");
+        if ($this->pwrootdir) {
+          // In public folder structure, add the pwrootdir to the source path
+          $from = str_replace(['\\', '/'], '/', "$release/$this->pwrootdir/$file");
+        }
+        
+        // Shared path always uses traditional structure (no public prefix)
+        $toAbs = str_replace(['\\', '/'], '/', "$shared/$file");
         $isfile = !!pathinfo($from, PATHINFO_EXTENSION);
         $toDir = dirname($toAbs);
         $fromDir = dirname($from);
@@ -684,7 +736,10 @@ class Deployment extends WireData
         // we create relative symlinks
         $level = substr_count($file, "/");
         $to = "shared/$file";
-        for ($i = 0; $i <= $level; $i++) $to = "../$to";
+        
+        // For public folder structure, we need one extra "../" because we're one level deeper
+        $extraLevels = $this->pwrootdir ? 1 : 0;
+        for ($i = 0; $i <= $level + $extraLevels; $i++) $to = "../$to";
 
         if ($isfile) {
           $this->echo("  [file]        $from");
@@ -761,6 +816,18 @@ class Deployment extends WireData
   public function verbose()
   {
     $this->isVerbose = true;
+  }
+
+  /**
+   * Ensure cache directory exists after deletion
+   */
+  public function ensureCacheDir()
+  {
+    $sitePrefix = $this->pwrootdir ? "/$this->pwrootdir" : '';
+    $cacheDir = $this->paths->release . $sitePrefix . '/site/assets/cache';
+    if (!is_dir($cacheDir)) {
+      mkdir($cacheDir, 0777, true);
+    }
   }
 
   public function __debugInfo()
