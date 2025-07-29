@@ -222,6 +222,17 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
     }
   }
 
+  /**
+   * Get the path to the RockMigrations directory.
+   *
+   * @return string
+   */
+  public function getRockMigrationsPath() {
+    $paths = wire()->config->paths;
+    return $paths->rockMigrations ?? $paths->site . 'RockMigrations';
+  }
+
+
   /** ##### regular methods ##### */
 
   /**
@@ -1948,7 +1959,7 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
   private function getConfigFileArray(string $file): array
   {
     $allowedPaths = [
-      wire()->config->paths->site . 'RockMigrations',
+      $this->getRockMigrationsPath(),
       wire()->config->paths->siteModules,
     ];
     $opt = ['allowedPaths' => $allowedPaths];
@@ -5950,9 +5961,11 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
     // then the second step is to run all migrations. This is to prevent race conditions
     // where migrations try to create fields/templates/etc. that are not yet created
 
+    $path = $this->getRockMigrationsPath();
+
     // add all files in /site/RockMigrations
     $this->watch(
-      wire()->config->paths->site . "RockMigrations",
+      $path,
       1000,
       ['recursive' => true]
     );
